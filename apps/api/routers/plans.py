@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, timezone
 from typing import Optional
+import asyncio
 
 from auth import get_current_user, get_coach_id
 from database import get_supabase_client
 from schemas import PlanCreate, PlanResponse, WorkoutDayResponse, PlanGenerateRequest
-from services import AIService, EmailService
+from services import EmailService
+from agents import WorkoutPlanningAgent
 
 router = APIRouter()
-ai_service = AIService()
 email_service = EmailService()
 
 
@@ -109,12 +110,20 @@ async def generate_plan(
     # Get coach's training philosophy
     training_philosophy = user.get("user_metadata", {}).get("training_philosophy", "")
 
-    # Generate plan using AI
-    plan_data = await ai_service.generate_workout_plan_stub(
-        assessment=assessment.data,
+    # Generate plan using the agentic workflow
+    agent = WorkoutPlanningAgent(coach_philosophy=training_philosophy)
+
+    # Prepare assessment data for agent
+    agent_assessment = {
+        **assessment.data,
+        "client_name": client.data.get("name", "Client"),
+    }
+
+    # Run the agent to generate the plan
+    plan_data = await agent.generate_plan(
+        assessment=agent_assessment,
         coach_preferences=request.coach_preferences.model_dump(),
-        training_philosophy=training_philosophy,
-        exercises=exercises.data,
+        exercises=exercises.data if exercises.data else None,
     )
 
     now = datetime.now(timezone.utc)
